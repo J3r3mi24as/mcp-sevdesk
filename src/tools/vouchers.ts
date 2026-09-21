@@ -121,6 +121,93 @@ export const voucherTools = {
     },
   },
 
+  list_expense_accounts: {
+    description:
+      "List the active booking accounts (Buchungskonten, AccountingType) of this sevdesk client's chart of accounts (skrAt for RVL) as compact rows {id, name, skrAt, type}. Pick one for create_voucher (`accountingTypeId` = id) — never invent an id. The list mixes expense and revenue accounts: choose an expense account.",
+    inputSchema: z.object({}),
+    handler: async (client: SevdeskClient, _params: Record<string, never>) => {
+      // Not /ReceiptGuidance/*: that endpoint 500s with "Chart of account
+      // SKRAT is unknown!" for an Austrian client. /AccountingType is absent
+      // from the generated spec, hence the cast; skrAt is the Austrian number.
+      const { data, error } = await (client as any).GET("/AccountingType", {
+        params: { query: { limit: 1000 } },
+      });
+      if (error) throw new Error(JSON.stringify(error));
+      const rows = (data?.objects ?? []) as Array<Record<string, string | null>>;
+      return rows
+        .filter((a) => a.skrAt && a.active === "1" && a.hidden !== "1")
+        .map((a) => ({ id: Number(a.id), name: a.name, skrAt: a.skrAt, type: a.type }));
+    },
+  },
+
+  create_voucher: {
+    description:
+      "Create an expense voucher (incoming invoice/receipt) as a DRAFT (status 50) in sevdesk and attach an already uploaded file. Draft only: booking/payment stays a separate, gated step (book_voucher). `filename` is the sevdesk-internal temp filename returned by Voucher/Factory/uploadTempFile, not a local path.",
+    inputSchema: z.object({
+      supplierName: z.string().describe("Name of the issuer as printed on the document"),
+      supplierContactId: z.number().optional().describe("sevdesk contact id if the supplier already exists"),
+      voucherDate: z.string().describe("Document date, YYYY-MM-DD"),
+      description: z.string().describe("Invoice number and short subject, e.g. 'RE-2026-0412 Hosting September'"),
+      taxType: z
+        .enum(["default", "eu", "noteu", "ss"])
+        .describe("default=Umsatzsteuer ausgewiesen (inkl. AT-Inland), eu=innergemeinschaftlich, noteu=Drittland/Reverse Charge, ss=nicht steuerbar §19"),
+      accountingTypeId: z.number().describe("Booking account id from list_expense_accounts"),
+      taxRate: z.number().describe("VAT rate in percent as printed on the document, e.g. 20, 10 or 0"),
+      sumGross: z.number().describe("Gross total in the document currency"),
+      currency: z.string().optional().describe("ISO code, default EUR"),
+      filename: z.string().optional().describe("sevdesk temp filename of the uploaded document"),
+    }),
+    handler: async (client: SevdeskClient, params: {
+      supplierName: string;
+      supplierContactId?: number;
+      voucherDate: string;
+      description: string;
+      taxType: "default" | "eu" | "noteu" | "ss";
+      accountingTypeId: number;
+      taxRate: number;
+      sumGross: number;
+      currency?: string;
+      filename?: string;
+    }) => {
+      const { data, error } = await client.POST("/Voucher/Factory/saveVoucher", {
+        body: {
+          voucher: {
+            objectName: "Voucher",
+            mapAll: true,
+            voucherDate: params.voucherDate,
+            supplierName: params.supplierName,
+            supplier: params.supplierContactId
+              ? { id: params.supplierContactId, objectName: "Contact" }
+              : undefined,
+            description: params.description,
+            status: 50, // draft: nothing is booked or paid from here
+            creditDebit: "D",
+            voucherType: "VOU",
+            currency: params.currency ?? "EUR",
+            // taxType, not taxRule: this client's existing vouchers all carry
+            // taxType "default" with taxRule null (checked 2026-09-21).
+            taxType: params.taxType,
+          },
+          voucherPosSave: [
+            {
+              objectName: "VoucherPos",
+              mapAll: true,
+              accountingType: { id: params.accountingTypeId, objectName: "AccountingType" },
+              taxRate: params.taxRate,
+              net: false,
+              sumGross: params.sumGross,
+              isAsset: false,
+            },
+          ],
+          voucherPosDelete: null,
+          filename: params.filename,
+        } as any,
+      });
+      if (error) throw new Error(JSON.stringify(error));
+      return data;
+    },
+  },
+
   upload_voucher_file: {
     description: "Upload a file (receipt image/PDF) for a voucher",
     inputSchema: z.object({

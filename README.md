@@ -72,6 +72,7 @@ SEVDESK_API_TOKEN="dein-token" npm start
 |------|-------------|
 | `list_invoices` | Alle Rechnungen auflisten |
 | `get_invoice` | Einzelne Rechnung abrufen |
+| `create_invoice` | Neue Rechnung mit Positionen erstellen |
 | `get_invoice_pdf` | Rechnung als PDF abrufen |
 | `send_invoice_by_email` | Rechnung per E-Mail versenden |
 | `mark_invoice_as_sent` | Rechnung als versendet markieren |
