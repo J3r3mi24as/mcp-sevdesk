@@ -1,6 +1,16 @@
 import { z } from "zod";
 import type { SevdeskClient } from "../client.js";
 
+// The upstream defaults were German (19 %, Deutschland). RE-1002 went out with
+// 20 % positions but "Umsatzsteuer 19%" stored as taxText, so derive the text
+// from the positions instead of hardcoding a rate.
+const AUSTRIA_COUNTRY_ID = 3;
+
+export function defaultTaxText(positions: Array<{ taxRate: number }>): string {
+  const rates = [...new Set(positions.map((p) => p.taxRate))];
+  return rates.length === 1 ? `Umsatzsteuer ${rates[0]}%` : "Umsatzsteuer";
+}
+
 export const invoiceTools = {
   list_invoices: {
     description: "List all invoices from sevdesk. Supports filtering and pagination.",
@@ -91,11 +101,11 @@ export const invoiceTools = {
       timeToPay: z.number().optional().describe("Days the customer has to pay"),
       deliveryDate: z.string().optional().describe("Delivery date, format dd.mm.yyyy or Unix timestamp"),
       address: z.string().optional().describe("Full recipient address (name, street, zip, city, country). Omitted = use the contact's default address"),
-      addressCountryId: z.number().optional().describe("Static country ID for the invoice address, defaults to 1 (Deutschland)"),
+      addressCountryId: z.number().optional().describe("Static country ID for the invoice address, defaults to 3 (Österreich)"),
       discount: z.number().optional().describe("Overall invoice discount in percent, defaults to 0"),
       taxRuleId: z.enum(["1", "2", "3", "4", "5", "11", "17", "18", "19", "20", "21"]).optional()
         .describe("Tax rule ID (sevdesk-Update 2.0), defaults to 1 = Umsatzsteuer pflichtig - Standard"),
-      taxText: z.string().optional().describe("Tax text shown on the invoice, defaults to 'Umsatzsteuer 19%'"),
+      taxText: z.string().optional().describe("Tax text stored on the invoice. Omitted = derived from the position tax rates, e.g. 'Umsatzsteuer 20%'"),
       taxType: z.enum(["default", "eu", "noteu", "custom"]).optional().describe("Tax type (sevdesk-Update 1.0), defaults to 'default'"),
       invoiceType: z.enum(["RE", "WKR", "SR", "MA", "TR", "AR", "ER"]).optional().describe("Invoice type, defaults to RE (regular invoice)"),
       currency: z.string().optional().describe("Currency code per ISO-4217, defaults to EUR"),
@@ -156,12 +166,12 @@ export const invoiceTools = {
             timeToPay: params.timeToPay,
             deliveryDate: params.deliveryDate,
             address: params.address,
-            addressCountry: { id: params.addressCountryId ?? 1, objectName: "StaticCountry" },
+            addressCountry: { id: params.addressCountryId ?? AUSTRIA_COUNTRY_ID, objectName: "StaticCountry" },
             discount: params.discount ?? 0,
             status: params.status ?? "100",
             taxRate: 0,
             taxRule: { id: params.taxRuleId ?? "1", objectName: "TaxRule" },
-            taxText: params.taxText ?? "Umsatzsteuer 19%",
+            taxText: params.taxText ?? defaultTaxText(params.positions),
             taxType: params.taxType ?? "default",
             invoiceType: params.invoiceType ?? "RE",
             currency: params.currency ?? "EUR",
