@@ -58,7 +58,7 @@ export const contactTools = {
       familyname: z.string().optional().describe("The family name of the contact person"),
       customerNumber: z.string().optional().describe("Customer number"),
       description: z.string().optional().describe("Description of the contact"),
-      categoryId: z.number().describe("Category ID (3 = customer, 4 = supplier, 28 = partner)"),
+      categoryId: z.number().describe("Category ID (2 = supplier/Lieferant, 3 = customer/Kunde, 4 = partner/Partner, 28 = prospect/Interessent; verified via GET /Category?objectType=Contact)"),
     }),
     handler: async (client: SevdeskClient, params: {
       name?: string;

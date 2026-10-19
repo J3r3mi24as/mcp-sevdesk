@@ -1,12 +1,26 @@
 import { z } from "zod";
 import type { SevdeskClient } from "../client.js";
 
+// Umsatzsteuerregelung (TaxSet) of this client for Ausgabebelege. The sevdesk UI
+// saves taxType "custom" + taxSet; a voucher with plain taxType "default" gets no
+// regime and the UI falls back to its first option. IDs are client-specific, read
+// from vouchers corrected by hand in the UI on 2026-10-19; override via env.
+const TAX_SET_VORSTEUER = Number(process.env.SEVDESK_TAXSET_VORSTEUER ?? 131709); // Vorsteuer, USt ausgewiesen (20 %/10 %)
+const TAX_SET_REVERSE_CHARGE = Number(process.env.SEVDESK_TAXSET_REVERSE_CHARGE ?? 131713); // EU-Leistung / Reverse Charge, 0 %
+const TAX_SET_STEUERFREI = Number(process.env.SEVDESK_TAXSET_STEUERFREI ?? 131711); // ohne USt (z. B. Bankspesen)
+
+function taxSetFor(taxType: "default" | "eu" | "noteu" | "ss", taxRate: number): number {
+  if (taxType === "eu" || taxType === "noteu") return TAX_SET_REVERSE_CHARGE;
+  if (taxType === "ss" || taxRate === 0) return TAX_SET_STEUERFREI;
+  return TAX_SET_VORSTEUER;
+}
+
 export const voucherTools = {
   list_vouchers: {
     description: "List all vouchers (receipts/expenses) from sevdesk",
     inputSchema: z.object({
       status: z.enum(["50", "100", "1000"]).optional().describe("Voucher status: 50=Draft, 100=Unpaid, 1000=Paid"),
-      creditDebit: z.enum(["C", "D"]).optional().describe("C=Credit (income), D=Debit (expense)"),
+      creditDebit: z.enum(["C", "D"]).optional().describe("C = Ausgabe/expense, D = Einnahme/income (sevdesk names it backwards; verified against real vouchers)"),
       descriptionLike: z.string().optional().describe("Filter by description (partial match)"),
       startDate: z.string().optional().describe("Filter by start date (Unix timestamp)"),
       endDate: z.string().optional().describe("Filter by end date (Unix timestamp)"),
@@ -142,7 +156,7 @@ export const voucherTools = {
 
   create_voucher: {
     description:
-      "Create an expense voucher (incoming invoice/receipt) as a DRAFT (status 50) in sevdesk and attach an already uploaded file. Draft only: booking/payment stays a separate, gated step (book_voucher). `filename` is the sevdesk-internal temp filename returned by Voucher/Factory/uploadTempFile, not a local path.",
+      "Create an expense voucher (Belegart Ausgabe, creditDebit C; incoming invoice/receipt) as a DRAFT (status 50) in sevdesk and attach an already uploaded file. Draft only: booking/payment stays a separate, gated step (book_voucher). `filename` is the sevdesk-internal temp filename returned by Voucher/Factory/uploadTempFile, not a local path.",
     inputSchema: z.object({
       supplierName: z.string().describe("Name of the issuer as printed on the document"),
       supplierContactId: z.number().optional().describe("sevdesk contact id if the supplier already exists"),
@@ -181,12 +195,16 @@ export const voucherTools = {
               : undefined,
             description: params.description,
             status: 50, // draft: nothing is booked or paid from here
-            creditDebit: "D",
+            // sevdesk names this backwards: C = Ausgabe (expense), D = Einnahme (income).
+            // Verified 2026-09-21 against real expense vouchers (1Password, sevDesk GmbH,
+            // hosting invoices all carry C); a voucher created with D showed up as "Einnahme".
+            creditDebit: "C",
             voucherType: "VOU",
             currency: params.currency ?? "EUR",
-            // taxType, not taxRule: this client's existing vouchers all carry
-            // taxType "default" with taxRule null (checked 2026-09-21).
-            taxType: params.taxType,
+            // taxType "custom" + taxSet is what the sevdesk UI writes for this client
+            // (taxRule stays null); params.taxType only selects the taxSet.
+            taxType: "custom",
+            taxSet: { id: taxSetFor(params.taxType, params.taxRate), objectName: "TaxSet" },
           },
           voucherPosSave: [
             {

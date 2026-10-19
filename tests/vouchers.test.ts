@@ -35,7 +35,7 @@ describe("Vouchers API (lesend)", () => {
     });
 
     it.skipIf(!hasApiToken)("sollte Belege nach Credit/Debit filtern können", async () => {
-      // D = Debit (Ausgaben)
+      // sevdesk: C = Ausgabe, D = Einnahme (umgekehrt zum Namen)
       const result = await voucherTools.list_vouchers.handler(client, {
         creditDebit: "D",
         limit: 10,
